@@ -55,16 +55,44 @@ if ($action === 'chat') {
     $message = trim((string) ($input['message'] ?? ''));
     $context = trim((string) ($input['context'] ?? ''));
     $filename = trim((string) ($input['filename'] ?? 'main.php'));
+    $history = is_array($input['history'] ?? null) ? $input['history'] : [];
 
     if ($message === '') {
         jsonOut(['error' => 'message required'], 400);
     }
 
-    $prompt = "You are a coding AI like Cursor. Help with code. Current file: {$filename}\n\n";
+    $prompt = <<<PROMPT
+STRICT RULES — MUST FOLLOW:
+1. ALWAYS reply in Hinglish (Hindi + English mix). Example: "Bhai ye code sahi hai, bas line 5 fix karo."
+2. Kabhi bhi sirf English mein mat likho — har response Hinglish mein ho.
+3. Tone friendly aur helpful rakho — jaise ek bada bhai explain kare.
+4. Code blocks markdown mein do (```language).
+5. Pehle Hinglish mein explain karo, phir code do.
+
+Tu Cursor jaisa coding AI hai. File: {$filename}
+
+PROMPT;
+
     if ($context !== '') {
-        $prompt .= "Code:\n```\n{$context}\n```\n\n";
+        $prompt .= "\nCurrent code:\n```\n{$context}\n```\n";
     }
-    $prompt .= "User: {$message}\n\nIf you write code, use markdown code blocks with language tag.";
+
+    if ($history !== []) {
+        $prompt .= "\n--- Pichli chat (yaad rakh) ---\n";
+        foreach (array_slice($history, -12) as $h) {
+            if (!is_array($h)) {
+                continue;
+            }
+            $role = strtoupper((string) ($h['role'] ?? 'user'));
+            $content = trim((string) ($h['content'] ?? ''));
+            if ($content !== '') {
+                $prompt .= "{$role}: {$content}\n";
+            }
+        }
+        $prompt .= "--- Chat khatam ---\n";
+    }
+
+    $prompt .= "\nUSER (ab jawab Hinglish mein do): {$message}";
 
     $url = WORM_API . '?q=' . rawurlencode($prompt);
     $ch = curl_init($url);
@@ -214,9 +242,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
 .msg-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 .msg-actions button{padding:6px 10px;font-size:11px;border-radius:6px;border:1px solid var(--border);
   background:var(--panel);color:var(--text);cursor:pointer}
-.msg-body pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
-  padding:10px;margin:8px 0;overflow-x:auto;font-size:12px}
+.code-wrap{position:relative;margin:8px 0}
+.code-wrap pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
+  padding:10px;padding-top:36px;overflow-x:auto;font-size:12px;margin:0}
+.copy-btn{position:absolute;top:6px;right:6px;padding:5px 10px;font-size:11px;
+  background:var(--panel);border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer;z-index:2}
+.copy-btn:active{background:var(--accent);color:#0b0d10}
 .msg-body code{background:var(--code-bg);padding:2px 5px;border-radius:4px;font-size:12px}
+.history-item.active{background:var(--panel);color:var(--accent)}
 
 .typing{padding:0 14px 6px;font-size:12px;color:var(--muted)}
 .typing.hide{display:none}
@@ -302,12 +335,7 @@ echo "Hello World";
 
       <div class="panel chat-panel" id="panelChat">
         <div class="panel-header">💬 Chat <button onclick="newChat()" style="background:none;border:none;color:var(--muted);cursor:pointer">Clear</button></div>
-        <div class="chat-messages" id="messages">
-          <div class="msg ai">
-            <span class="msg-label">AI</span>
-            <div class="msg-body">Namaste! Code likho, mujhse poocho, aur GitHub pe commit karo — Cursor jaisa.</div>
-          </div>
-        </div>
+        <div class="chat-messages" id="messages"></div>
         <div class="typing hide" id="typing">AI soch raha hai...</div>
         <div class="chat-input-area">
           <div class="input-wrap">
@@ -357,10 +385,100 @@ echo "Hello World";
 
 <script>
 const $ = id => document.getElementById(id);
+const STORAGE = 'cursor_sessions_v2';
 let lastAiCode = '';
 let lastAiReply = '';
 const codeStore = {};
 let codeId = 0;
+let sessions = {};
+let currentId = null;
+let chatLog = [];
+
+function saveSessions() {
+  localStorage.setItem(STORAGE, JSON.stringify(sessions));
+  localStorage.setItem('cursor_editor', $('codeEditor').value);
+  localStorage.setItem('cursor_filename', $('filenameInput').value);
+}
+
+function loadSessions() {
+  try { sessions = JSON.parse(localStorage.getItem(STORAGE) || '{}'); } catch { sessions = {}; }
+  const savedEditor = localStorage.getItem('cursor_editor');
+  const savedFile = localStorage.getItem('cursor_filename');
+  if (savedEditor) $('codeEditor').value = savedEditor;
+  if (savedFile) { $('filenameInput').value = savedFile; syncFilename(savedFile); }
+
+  const ids = Object.keys(sessions).sort((a,b) => sessions[b].updated - sessions[a].updated);
+  if (ids.length) {
+    loadSession(ids[0]);
+  } else {
+    createSession(true);
+  }
+  renderHistory();
+}
+
+function createSession(showWelcome=true) {
+  currentId = 's' + Date.now();
+  chatLog = showWelcome ? [{role:'ai', content:'Namaste bhai! Code likho, Hinglish mein poocho, GitHub pe commit bhi kar sakte ho.'}] : [];
+  sessions[currentId] = { id: currentId, title: 'Nayi chat', updated: Date.now(), messages: chatLog };
+  saveSessions();
+  renderMessages();
+  renderHistory();
+}
+
+function loadSession(id) {
+  if (!sessions[id]) return;
+  currentId = id;
+  chatLog = sessions[id].messages || [];
+  renderMessages();
+  renderHistory();
+}
+
+function saveChat() {
+  if (!currentId) return;
+  sessions[currentId].messages = chatLog;
+  sessions[currentId].updated = Date.now();
+  const firstUser = chatLog.find(m => m.role === 'user');
+  if (firstUser) sessions[currentId].title = firstUser.content.slice(0, 36);
+  saveSessions();
+  renderHistory();
+}
+
+function renderHistory() {
+  const el = $('history');
+  if (!el) return;
+  const ids = Object.keys(sessions).sort((a,b) => sessions[b].updated - sessions[a].updated);
+  el.innerHTML = ids.map(id =>
+    `<div class="history-item${id===currentId?' active':''}" onclick="loadSession('${id}')">${esc(sessions[id].title)}</div>`
+  ).join('');
+}
+
+function renderMessages() {
+  $('messages').innerHTML = '';
+  chatLog.forEach(m => {
+    if (m.role === 'user') addMessageDOM('user', esc(m.content));
+    else addMessageDOM('ai', formatReply(m.content), m.code || extractCode(m.content));
+  });
+}
+
+function attachCopyButtons(container) {
+  container.querySelectorAll('pre').forEach(pre => {
+    if (pre.parentElement?.classList.contains('code-wrap')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'code-wrap';
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = '📋 Copy';
+    btn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(pre.textContent);
+        btn.textContent = '✓ Copied';
+        setTimeout(() => btn.textContent = '📋 Copy', 2000);
+      } catch { toast('Copy failed', 'err'); }
+    };
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.append(btn, pre);
+  });
+}
 
 function ghSettings() {
   return {
@@ -424,23 +542,34 @@ function toast(msg, type='') {
   setTimeout(() => t.remove(), 3500);
 }
 
-function addMessage(role, html, code='') {
+function addMessageDOM(role, html, code='') {
   const div = document.createElement('div');
   div.className = 'msg ' + role;
-  div.innerHTML = `<span class="msg-label">${role==='user'?'You':'AI'}</span><div class="msg-body">${html}</div>`;
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  body.innerHTML = html;
+  div.innerHTML = `<span class="msg-label">${role==='user'?'Tu':'AI'}</span>`;
+  div.appendChild(body);
+  attachCopyButtons(body);
 
   if (role === 'ai' && code) {
     const id = 'c' + (++codeId);
     codeStore[id] = code;
     const actions = document.createElement('div');
     actions.className = 'msg-actions';
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '📋 Copy Code';
+    copyBtn.onclick = async () => {
+      await navigator.clipboard.writeText(code);
+      toast('Code copy ho gaya!', 'ok');
+    };
     const applyBtn = document.createElement('button');
-    applyBtn.textContent = 'Apply to Editor';
+    applyBtn.textContent = 'Apply';
     applyBtn.onclick = () => applyCode(codeStore[id]);
     const commitBtn = document.createElement('button');
     commitBtn.textContent = 'Commit ↑';
     commitBtn.onclick = () => openCommitModal($('filenameInput').value, codeStore[id]);
-    actions.append(applyBtn, commitBtn);
+    actions.append(copyBtn, applyBtn, commitBtn);
     div.appendChild(actions);
   }
 
@@ -448,10 +577,13 @@ function addMessage(role, html, code='') {
   $('messages').scrollTop = $('messages').scrollHeight;
 }
 
-function newChat() {
-  $('messages').innerHTML = `<div class="msg ai"><span class="msg-label">AI</span>
-    <div class="msg-body">Nayi chat! Kya karna hai?</div></div>`;
+function addMessage(role, text, code='') {
+  chatLog.push({ role, content: text, code: code || undefined });
+  saveChat();
+  addMessageDOM(role, role === 'user' ? esc(text) : formatReply(text), code);
 }
+
+function newChat() { createSession(true); }
 
 function applyCode(code) {
   if (!code) return;
@@ -471,25 +603,27 @@ async function sendMessage() {
   const context = $('codeEditor').value;
   const filename = $('filenameInput').value.trim() || 'main.php';
 
-  addMessage('user', esc(message));
+  addMessage('user', message);
   $('chatInput').value = '';
   $('sendBtn').disabled = true;
   $('typing').classList.remove('hide');
+  saveSessions();
 
   const commitWords = /commit|push|github|save karo|upload/i;
   const wantsCommit = commitWords.test(message);
+  const history = chatLog.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
 
   try {
     const res = await fetch('?action=chat', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({message, context, filename}),
+      body: JSON.stringify({ message, context, filename, history }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
     lastAiReply = data.reply || '';
     lastAiCode = extractCode(lastAiReply);
-    addMessage('ai', formatReply(lastAiReply), lastAiCode);
+    addMessage('ai', lastAiReply, lastAiCode);
 
     if (wantsCommit && lastAiCode) {
       setTimeout(() => openCommitModal(filename, lastAiCode, 'AI: ' + message.slice(0,60)), 500);
@@ -497,7 +631,7 @@ async function sendMessage() {
       openCommitModal(filename, context, message.slice(0,80));
     }
   } catch(e) {
-    addMessage('ai', `<span style="color:var(--danger)">${esc(e.message)}</span>`);
+    addMessage('ai', 'Bhai error aa gaya: ' + e.message);
   } finally {
     $('sendBtn').disabled = false;
     $('typing').classList.add('hide');
@@ -538,7 +672,7 @@ async function doCommit() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     toast('✓ ' + (data.message || 'Committed!'), 'ok');
-    addMessage('ai', `<span style="color:var(--green)">✓ GitHub commit successful!\n${esc(data.url||'')}</span>`);
+    addMessage('ai', '✓ Bhai GitHub pe commit ho gaya!\n' + (data.url || ''));
   } catch(e) {
     toast('Commit failed: ' + e.message, 'err');
   }
@@ -562,7 +696,11 @@ async function testGithub() {
 $('chatInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
+$('codeEditor').addEventListener('input', () => saveSessions());
+$('filenameInput').addEventListener('input', () => saveSessions());
 $('commitModal').addEventListener('click', e => { if (e.target === $('commitModal')) closeCommitModal(); });
+
+loadSessions();
 </script>
 </body>
 </html>
