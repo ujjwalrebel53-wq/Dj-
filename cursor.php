@@ -16,7 +16,12 @@ function wormChat(string $prompt, int $maxParts = 8): string
     for ($i = 0; $i < $maxParts; $i++) {
         $url = WORM_API . '?q=' . rawurlencode($partPrompt);
         $ch = curl_init($url);
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120]);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (CursorPHP/1.0)',
+            CURLOPT_FOLLOWLOCATION => true,
+        ]);
         $body = curl_exec($ch);
         curl_close($ch);
 
