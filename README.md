@@ -80,15 +80,17 @@ ssh rebelai@ssh-rebelai.alwaysdata.net
 wget https://raw.githubusercontent.com/ujjwalrebel53-wq/Dj-/main/alwaysdata/rebelai-install.sh -O rebelai-install.sh && bash rebelai-install.sh
 ```
 
-### 3. AlwaysData panel
+### 3. AlwaysData panel (default `~/www` — usually change nahi chahiye)
 
-**admin.alwaysdata.com** → Web → Sites → `rebelai.alwaysdata.net` → Edit:
+**admin.alwaysdata.com** → Web → Sites → `rebelai.alwaysdata.net`:
 
 | Setting | Value |
 |---------|-------|
 | Type | PHP |
 | PHP version | 8.2+ |
-| Root directory | `/home/rebelai/dj-ai/alwaysdata/public` |
+| Root directory | `/home/rebelai/www` |
+
+Files: `~/www/index.php` + `~/dj-ai/dj-ai.php`
 
 ### 4. Test
 

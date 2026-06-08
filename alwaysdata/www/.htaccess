@@ -9,7 +9,10 @@ FallbackResource /index.php
     RewriteRule ^ index.php [QSA,L]
 </IfModule>
 
-# Sensitive files block
 <FilesMatch "^\.">
     Require all denied
 </FilesMatch>
+
+<Files "dj-ai.php">
+    Require all denied
+</Files>
