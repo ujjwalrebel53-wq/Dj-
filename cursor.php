@@ -1,460 +1,568 @@
 <?php
 /**
- * cursor.php — Cursor jaisi AI coding website (single file)
- * Upload: ~/www/cursor.php
- * Open:  https://rebelai.alwaysdata.net/cursor.php
+ * cursor.php — Cursor jaisi AI website + GitHub commit
+ * https://rebelai.alwaysdata.net/cursor.php
  */
 
 declare(strict_types=1);
 
 const WORM_API = 'https://wormgpt.freeapihub.workers.dev/chat';
 
-// ─── API proxy ────────────────────────────────────────────────────────────────
-if (($_GET['action'] ?? '') === 'chat') {
+function jsonOut(array $data, int $code = 200): void
+{
+    http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
     header('Access-Control-Allow-Origin: *');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
+function githubRequest(string $token, string $method, string $url, ?array $body = null): array
+{
+    $ch = curl_init($url);
+    $headers = [
+        'Authorization: Bearer ' . $token,
+        'Accept: application/vnd.github+json',
+        'User-Agent: CursorPHP',
+        'X-GitHub-Api-Version: 2022-11-28',
+    ];
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 60,
+        CURLOPT_CUSTOMREQUEST => $method,
+        CURLOPT_HTTPHEADER => $headers,
+    ]);
+    if ($body !== null) {
+        $headers[] = 'Content-Type: application/json';
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+    }
+    $response = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+    if ($response === false) {
+        return ['ok' => false, 'code' => 500, 'error' => $error];
+    }
+    $decoded = json_decode($response, true);
+    return ['ok' => $code >= 200 && $code < 300, 'code' => $code, 'data' => $decoded, 'raw' => $response];
+}
+
+$action = $_GET['action'] ?? '';
+
+if ($action === 'chat') {
     $input = json_decode(file_get_contents('php://input') ?: '{}', true);
     $message = trim((string) ($input['message'] ?? ''));
     $context = trim((string) ($input['context'] ?? ''));
+    $filename = trim((string) ($input['filename'] ?? 'main.php'));
 
     if ($message === '') {
-        http_response_code(400);
-        echo json_encode(['error' => 'message required']);
-        exit;
+        jsonOut(['error' => 'message required'], 400);
     }
 
-    $prompt = $message;
+    $prompt = "You are a coding AI like Cursor. Help with code. Current file: {$filename}\n\n";
     if ($context !== '') {
-        $prompt = "User code context:\n```\n{$context}\n```\n\nUser question:\n{$message}";
+        $prompt .= "Code:\n```\n{$context}\n```\n\n";
     }
+    $prompt .= "User: {$message}\n\nIf you write code, use markdown code blocks with language tag.";
 
     $url = WORM_API . '?q=' . rawurlencode($prompt);
     $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 120,
-        CURLOPT_FOLLOWLOCATION => true,
-    ]);
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120]);
     $body = curl_exec($ch);
-    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    if ($body === false || $code >= 400) {
-        http_response_code(500);
-        echo json_encode(['error' => 'API failed']);
-        exit;
+    if ($body === false) {
+        jsonOut(['error' => 'API failed'], 500);
+    }
+    $data = json_decode($body, true);
+    jsonOut(['reply' => (string) ($data['reply'] ?? '')]);
+}
+
+if ($action === 'github_test') {
+    $input = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $token = trim((string) ($input['token'] ?? ''));
+    if ($token === '') {
+        jsonOut(['error' => 'token required'], 400);
+    }
+    $res = githubRequest($token, 'GET', 'https://api.github.com/user');
+    if (!$res['ok']) {
+        jsonOut(['error' => 'Invalid token', 'detail' => $res['data']['message'] ?? ''], 401);
+    }
+    jsonOut(['ok' => true, 'user' => $res['data']['login'] ?? '']);
+}
+
+if ($action === 'commit') {
+    $input = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $token = trim((string) ($input['token'] ?? ''));
+    $owner = trim((string) ($input['owner'] ?? ''));
+    $repo = trim((string) ($input['repo'] ?? ''));
+    $branch = trim((string) ($input['branch'] ?? 'main'));
+    $path = ltrim(trim((string) ($input['path'] ?? 'main.php')), '/');
+    $message = trim((string) ($input['message'] ?? 'Update via Cursor AI'));
+    $content = (string) ($input['content'] ?? '');
+
+    if ($token === '' || $owner === '' || $repo === '' || $content === '') {
+        jsonOut(['error' => 'token, owner, repo, content required'], 400);
     }
 
-    $data = json_decode($body, true);
-    echo json_encode([
-        'reply' => (string) ($data['reply'] ?? 'No response'),
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    $apiBase = "https://api.github.com/repos/{$owner}/{$repo}/contents/" . rawurlencode($path);
+    $sha = null;
+
+    $existing = githubRequest($token, 'GET', $apiBase . '?ref=' . rawurlencode($branch));
+    if ($existing['ok'] && isset($existing['data']['sha'])) {
+        $sha = $existing['data']['sha'];
+    }
+
+    $payload = [
+        'message' => $message,
+        'content' => base64_encode($content),
+        'branch' => $branch,
+    ];
+    if ($sha) {
+        $payload['sha'] = $sha;
+    }
+
+    $res = githubRequest($token, 'PUT', $apiBase, $payload);
+    if (!$res['ok']) {
+        jsonOut([
+            'error' => $res['data']['message'] ?? 'Commit failed',
+            'detail' => $res['data'],
+        ], $res['code'] ?: 500);
+    }
+
+    jsonOut([
+        'ok' => true,
+        'sha' => $res['data']['commit']['sha'] ?? '',
+        'url' => $res['data']['content']['html_url'] ?? '',
+        'message' => "Committed to {$owner}/{$repo}:{$branch}",
+    ]);
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cursor AI</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0b0d10;
-      --sidebar: #111318;
-      --panel: #16181d;
-      --border: #2a2d35;
-      --text: #e4e4e7;
-      --muted: #8b8f98;
-      --accent: #6c9eff;
-      --accent-hover: #8ab4ff;
-      --user-bg: #1c2333;
-      --ai-bg: #14161a;
-      --code-bg: #0d0f14;
-      --green: #4ade80;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      height: 100vh;
-      overflow: hidden;
-    }
-    .app { display: flex; height: 100vh; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b0d10">
+<title>Cursor AI</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0b0d10;--sidebar:#111318;--panel:#16181d;--border:#2a2d35;
+  --text:#e4e4e7;--muted:#8b8f98;--accent:#6c9eff;--accent2:#8ab4ff;
+  --user-bg:#1c2333;--ai-bg:#14161a;--code-bg:#0d0f14;--green:#4ade80;
+  --danger:#f87171;--safe-b:env(safe-area-inset-bottom,0px);
+  --safe-t:env(safe-area-inset-top,0px);
+  --tab-h:56px;--top-h:48px;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  -webkit-tap-highlight-color:transparent}
+.app{display:flex;height:100dvh;padding-top:var(--safe-t)}
 
-    /* Sidebar */
-    .sidebar {
-      width: 260px;
-      background: var(--sidebar);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-    }
-    .logo {
-      padding: 16px 18px;
-      font-size: 15px;
-      font-weight: 600;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .logo-icon {
-      width: 28px; height: 28px;
-      background: linear-gradient(135deg, #6c9eff, #a78bfa);
-      border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px;
-    }
-    .new-chat {
-      margin: 12px;
-      padding: 10px 14px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      cursor: pointer;
-      font-size: 13px;
-      text-align: left;
-      transition: background .15s;
-    }
-    .new-chat:hover { background: #1e2128; }
-    .sidebar-label {
-      padding: 8px 18px 4px;
-      font-size: 11px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .05em;
-    }
-    .history { flex: 1; overflow-y: auto; padding: 4px 8px; }
-    .history-item {
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 13px;
-      color: var(--muted);
-      cursor: pointer;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .history-item:hover { background: var(--panel); color: var(--text); }
+/* Sidebar */
+.sidebar{width:240px;background:var(--sidebar);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;flex-shrink:0}
+.logo{padding:14px 16px;font-weight:600;font-size:15px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px}
+.logo-icon{width:26px;height:26px;background:linear-gradient(135deg,#6c9eff,#a78bfa);
+  border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px}
+.btn{padding:10px 14px;margin:10px;background:var(--panel);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);font-size:13px;cursor:pointer;text-align:left}
+.btn:active{opacity:.8}
+.btn-primary{background:var(--accent);color:#0b0d10;border:none;font-weight:600;text-align:center}
+.btn-green{background:#166534;border-color:#22c55e;color:#bbf7d0}
+.history{flex:1;overflow-y:auto;padding:4px 8px}
+.history-item{padding:10px 12px;border-radius:8px;font-size:13px;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-    /* Main */
-    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+/* Main */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{height:var(--top-h);border-bottom:1px solid var(--border);display:flex;align-items:center;
+  padding:0 12px;gap:8px;font-size:12px;background:var(--sidebar);overflow-x:auto}
+.topbar button,.topbar .tab{padding:6px 12px;border-radius:6px;border:1px solid var(--border);
+  background:var(--panel);color:var(--text);font-size:12px;cursor:pointer;white-space:nowrap}
+.topbar .tab.active{border-color:var(--accent);color:var(--accent)}
+.topbar .spacer{flex:1}
+.status-dot{width:7px;height:7px;background:var(--green);border-radius:50%}
 
-    .topbar {
-      height: 44px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      padding: 0 16px;
-      gap: 12px;
-      font-size: 13px;
-      color: var(--muted);
-      background: var(--sidebar);
-    }
-    .topbar .file-tab {
-      padding: 4px 12px;
-      background: var(--panel);
-      border-radius: 6px 6px 0 0;
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-bottom: none;
-    }
-    .status-dot {
-      width: 7px; height: 7px;
-      background: var(--green);
-      border-radius: 50%;
-      margin-left: auto;
-    }
+.workspace{flex:1;display:flex;min-height:0}
 
-    .workspace { flex: 1; display: flex; min-height: 0; }
+/* Panels */
+.panel{display:none;flex-direction:column;min-height:0;background:var(--bg)}
+.panel.active{display:flex}
+.editor-panel{flex:1;border-right:1px solid var(--border)}
+.chat-panel{width:400px;flex-shrink:0}
+.settings-panel{flex:1;padding:16px;overflow-y:auto}
 
-    /* Editor */
-    .editor-panel {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      border-right: 1px solid var(--border);
-      min-width: 0;
-    }
-    .editor-header {
-      padding: 6px 14px;
-      font-size: 12px;
-      color: var(--muted);
-      border-bottom: 1px solid var(--border);
-      background: var(--panel);
-    }
-    #codeEditor {
-      flex: 1;
-      width: 100%;
-      background: var(--code-bg);
-      color: #abb2bf;
-      border: none;
-      padding: 16px;
-      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-      font-size: 13px;
-      line-height: 1.6;
-      resize: none;
-      outline: none;
-    }
+.panel-header{padding:10px 14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);
+  background:var(--panel);display:flex;align-items:center;justify-content:space-between}
+#codeEditor,#filenameInput{flex:1;width:100%;background:var(--code-bg);color:#abb2bf;
+  border:none;padding:14px;font-family:'JetBrains Mono',Consolas,monospace;font-size:14px;
+  line-height:1.6;resize:none;outline:none;-webkit-overflow-scrolling:touch}
+#filenameInput{flex:none;height:40px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:13px}
 
-    /* Chat */
-    .chat-panel {
-      width: 420px;
-      display: flex;
-      flex-direction: column;
-      background: var(--bg);
-      flex-shrink: 0;
-    }
-    .chat-header {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border);
-      font-size: 13px;
-      font-weight: 500;
-    }
-    .chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .msg { display: flex; flex-direction: column; gap: 6px; }
-    .msg-label { font-size: 11px; color: var(--muted); font-weight: 500; }
-    .msg-body {
-      padding: 12px 14px;
-      border-radius: 10px;
-      font-size: 13.5px;
-      line-height: 1.65;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .msg.user .msg-body { background: var(--user-bg); border: 1px solid var(--border); }
-    .msg.ai .msg-body { background: var(--ai-bg); border: 1px solid var(--border); }
-    .msg-body code {
-      background: var(--code-bg);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 12px;
-    }
-    .msg-body pre {
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
-      margin: 8px 0;
-      overflow-x: auto;
-      font-family: monospace;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-    .typing { color: var(--muted); font-size: 13px; padding: 0 16px 8px; }
-    .typing.hidden { display: none; }
+.chat-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:12px;
+  -webkit-overflow-scrolling:touch}
+.msg-body{padding:12px;border-radius:10px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.msg.user .msg-body{background:var(--user-bg);border:1px solid var(--border)}
+.msg.ai .msg-body{background:var(--ai-bg);border:1px solid var(--border)}
+.msg-label{font-size:11px;color:var(--muted);margin-bottom:4px;display:block}
+.msg-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.msg-actions button{padding:6px 10px;font-size:11px;border-radius:6px;border:1px solid var(--border);
+  background:var(--panel);color:var(--text);cursor:pointer}
+.msg-body pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
+  padding:10px;margin:8px 0;overflow-x:auto;font-size:12px}
+.msg-body code{background:var(--code-bg);padding:2px 5px;border-radius:4px;font-size:12px}
 
-    .chat-input-area {
-      padding: 12px 16px 16px;
-      border-top: 1px solid var(--border);
-    }
-    .input-wrap {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 4px;
-      display: flex;
-      flex-direction: column;
-    }
-    .input-wrap:focus-within { border-color: var(--accent); }
-    #chatInput {
-      background: transparent;
-      border: none;
-      color: var(--text);
-      padding: 10px 12px;
-      font-size: 13.5px;
-      resize: none;
-      outline: none;
-      font-family: inherit;
-      min-height: 44px;
-      max-height: 120px;
-    }
-    .input-actions {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 4px 8px 4px 12px;
-    }
-    .input-hint { font-size: 11px; color: var(--muted); }
-    #sendBtn {
-      background: var(--accent);
-      color: #0b0d10;
-      border: none;
-      border-radius: 8px;
-      padding: 6px 14px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background .15s;
-    }
-    #sendBtn:hover { background: var(--accent-hover); }
-    #sendBtn:disabled { opacity: .4; cursor: not-allowed; }
+.typing{padding:0 14px 6px;font-size:12px;color:var(--muted)}
+.typing.hide{display:none}
+.chat-input-area{padding:10px 12px calc(10px + var(--safe-b));border-top:1px solid var(--border)}
+.input-wrap{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:4px}
+.input-wrap:focus-within{border-color:var(--accent)}
+#chatInput{width:100%;background:transparent;border:none;color:var(--text);padding:10px 12px;
+  font-size:16px;resize:none;outline:none;min-height:44px;max-height:120px}
+.input-actions{display:flex;justify-content:space-between;align-items:center;padding:4px 8px}
+#sendBtn{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;
+  padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;min-height:44px;min-width:64px}
 
-    @media (max-width: 900px) {
-      .sidebar { display: none; }
-      .editor-panel { display: none; }
-      .chat-panel { width: 100%; }
-    }
-  </style>
+/* Settings */
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.field input{width:100%;padding:12px;background:var(--panel);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);font-size:16px}
+.field small{display:block;margin-top:4px;font-size:11px;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.toast{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 12px);left:50%;transform:translateX(-50%);
+  background:#1e293b;border:1px solid var(--border);padding:12px 18px;border-radius:10px;
+  font-size:13px;z-index:999;max-width:90vw;text-align:center;box-shadow:0 8px 32px #0008}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--danger);color:var(--danger)}
+
+/* Mobile bottom tabs */
+.mobile-tabs{display:none;position:fixed;bottom:0;left:0;right:0;height:calc(var(--tab-h) + var(--safe-b));
+  padding-bottom:var(--safe-b);background:var(--sidebar);border-top:1px solid var(--border);z-index:100}
+.mobile-tabs button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;background:none;border:none;color:var(--muted);font-size:10px;cursor:pointer;padding:6px}
+.mobile-tabs button.active{color:var(--accent)}
+.mobile-tabs button span{font-size:20px}
+
+/* Modal */
+.modal{position:fixed;inset:0;background:#000a;display:none;align-items:flex-end;justify-content:center;z-index:200}
+.modal.show{display:flex}
+.modal-box{background:var(--panel);border:1px solid var(--border);border-radius:16px 16px 0 0;
+  padding:20px;width:100%;max-width:500px;max-height:85vh;overflow-y:auto}
+.modal-box h3{margin-bottom:14px;font-size:16px}
+.modal-box input,.modal-box textarea{width:100%;padding:12px;margin-bottom:10px;background:var(--code-bg);
+  border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:16px}
+.modal-actions{display:flex;gap:8px;margin-top:8px}
+.modal-actions button{flex:1;padding:12px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer}
+.modal-actions .cancel{background:var(--border);color:var(--text)}
+.modal-actions .confirm{background:var(--accent);color:#0b0d10}
+
+@media(max-width:768px){
+  .sidebar{display:none}
+  .chat-panel,.editor-panel{width:100%;border:none}
+  .workspace{padding-bottom:calc(var(--tab-h) + var(--safe-b))}
+  .mobile-tabs{display:flex}
+  .topbar .desk-only{display:none}
+  .chat-input-area{padding-bottom:calc(10px + var(--tab-h) + var(--safe-b))}
+}
+</style>
 </head>
 <body>
+
 <div class="app">
-  <aside class="sidebar">
-    <div class="logo">
-      <div class="logo-icon">⌘</div>
-      Cursor AI
-    </div>
-    <button class="new-chat" onclick="newChat()">+ New Chat</button>
-    <div class="sidebar-label">Recent</div>
+  <aside class="sidebar desk-only">
+    <div class="logo"><div class="logo-icon">⌘</div> Cursor AI</div>
+    <button class="btn" onclick="newChat()">+ New Chat</button>
+    <button class="btn btn-green" onclick="openCommitModal()">⬆ Commit GitHub</button>
     <div class="history" id="history"></div>
   </aside>
 
   <div class="main">
     <div class="topbar">
-      <span class="file-tab">main.php</span>
-      <span>PHP</span>
-      <span class="status-dot" title="Online"></span>
+      <span class="tab active" id="tabFile">📄 <span id="topFilename">main.php</span></span>
+      <button class="desk-only" onclick="openCommitModal()">Commit ↑</button>
+      <button onclick="applyAiCode()" title="AI code apply">Apply</button>
+      <span class="spacer"></span>
+      <span class="status-dot"></span>
     </div>
 
     <div class="workspace">
-      <div class="editor-panel">
-        <div class="editor-header">EDITOR — code yahan likho, AI context mein use karega</div>
-        <textarea id="codeEditor" spellcheck="false" placeholder="<?php echo htmlspecialchars('<?php
-// Apna code yahan likho...
+      <div class="panel editor-panel active" id="panelEditor">
+        <input id="filenameInput" value="main.php" placeholder="filename.php" oninput="syncFilename(this.value)">
+        <textarea id="codeEditor" spellcheck="false" placeholder="Code likho yahan..."><?php echo htmlspecialchars('<?php
 echo "Hello World";
-'); ?>"></textarea>
+'); ?></textarea>
       </div>
 
-      <div class="chat-panel">
-        <div class="chat-header">Chat</div>
+      <div class="panel chat-panel" id="panelChat">
+        <div class="panel-header">💬 Chat <button onclick="newChat()" style="background:none;border:none;color:var(--muted);cursor:pointer">Clear</button></div>
         <div class="chat-messages" id="messages">
           <div class="msg ai">
             <span class="msg-label">AI</span>
-            <div class="msg-body">Namaste! Main tumhara coding assistant hoon. Code editor mein code likho aur mujhse kuch bhi poocho — explain, fix, refactor, likhna — sab kar sakta hoon.</div>
+            <div class="msg-body">Namaste! Code likho, mujhse poocho, aur GitHub pe commit karo — Cursor jaisa.</div>
           </div>
         </div>
-        <div class="typing hidden" id="typing">AI soch raha hai...</div>
+        <div class="typing hide" id="typing">AI soch raha hai...</div>
         <div class="chat-input-area">
           <div class="input-wrap">
-            <textarea id="chatInput" rows="1" placeholder="Ask anything... (Ctrl+Enter to send)"></textarea>
+            <textarea id="chatInput" rows="1" placeholder="Ask AI... (commit karo, fix karo, likho)"></textarea>
             <div class="input-actions">
-              <span class="input-hint">Ctrl + Enter</span>
-              <button id="sendBtn" onclick="sendMessage()">Send ↑</button>
+              <span style="font-size:11px;color:var(--muted)">↵ send</span>
+              <button id="sendBtn" onclick="sendMessage()">Send</button>
             </div>
           </div>
         </div>
+      </div>
+
+      <div class="panel settings-panel" id="panelSettings">
+        <h2 style="margin-bottom:16px;font-size:18px">⚙️ GitHub Settings</h2>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Cursor jaisa — code seedha GitHub pe commit hoga. Token mein <code>repo</code> permission do.</p>
+        <div class="field"><label>GitHub Token</label><input type="password" id="ghToken" placeholder="ghp_xxxx"><small>github.com → Settings → Developer settings → Tokens</small></div>
+        <div class="grid2">
+          <div class="field"><label>Owner</label><input id="ghOwner" placeholder="username"></div>
+          <div class="field"><label>Repo</label><input id="ghRepo" placeholder="my-project"></div>
+        </div>
+        <div class="field"><label>Branch</label><input id="ghBranch" value="main"></div>
+        <button class="btn btn-primary" style="width:100%;margin:0 0 10px" onclick="saveGhSettings()">Save Settings</button>
+        <button class="btn" style="width:100%;margin:0" onclick="testGithub()">Test Connection</button>
       </div>
     </div>
   </div>
 </div>
 
+<nav class="mobile-tabs">
+  <button class="active" data-panel="editor" onclick="switchTab('editor',this)"><span>{ }</span>Code</button>
+  <button data-panel="chat" onclick="switchTab('chat',this)"><span>💬</span>Chat</button>
+  <button data-panel="settings" onclick="switchTab('settings',this)"><span>⚙️</span>GitHub</button>
+  <button onclick="openCommitModal()"><span>⬆</span>Commit</button>
+</nav>
+
+<div class="modal" id="commitModal">
+  <div class="modal-box">
+    <h3>⬆ Commit to GitHub</h3>
+    <input id="commitPath" placeholder="file path e.g. src/index.php">
+    <textarea id="commitMsg" rows="2" placeholder="Commit message"></textarea>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeCommitModal()">Cancel</button>
+      <button class="confirm" onclick="doCommit()">Commit ↑</button>
+    </div>
+  </div>
+</div>
+
 <script>
-const messagesEl = document.getElementById('messages');
-const chatInput = document.getElementById('chatInput');
-const codeEditor = document.getElementById('codeEditor');
-const sendBtn = document.getElementById('sendBtn');
-const typingEl = document.getElementById('typing');
-const historyEl = document.getElementById('history');
-let chats = JSON.parse(localStorage.getItem('cursor_chats') || '[]');
+const $ = id => document.getElementById(id);
+let lastAiCode = '';
+let lastAiReply = '';
+const codeStore = {};
+let codeId = 0;
 
-function saveHistory(title) {
-  chats.unshift({ title, time: Date.now() });
-  chats = chats.slice(0, 20);
-  localStorage.setItem('cursor_chats', JSON.stringify(chats));
-  renderHistory();
+function ghSettings() {
+  return {
+    token: localStorage.getItem('gh_token') || '',
+    owner: localStorage.getItem('gh_owner') || '',
+    repo: localStorage.getItem('gh_repo') || '',
+    branch: localStorage.getItem('gh_branch') || 'main',
+  };
 }
 
-function renderHistory() {
-  historyEl.innerHTML = chats.map(c =>
-    `<div class="history-item">${esc(c.title)}</div>`
-  ).join('');
+function loadGhSettings() {
+  const s = ghSettings();
+  $('ghToken').value = s.token;
+  $('ghOwner').value = s.owner;
+  $('ghRepo').value = s.repo;
+  $('ghBranch').value = s.branch;
 }
-renderHistory();
+loadGhSettings();
 
-function newChat() {
-  messagesEl.innerHTML = `<div class="msg ai">
-    <span class="msg-label">AI</span>
-    <div class="msg-body">Nayi chat shuru! Kya karna hai?</div>
-  </div>`;
-  chatInput.value = '';
-  chatInput.focus();
+function saveGhSettings() {
+  localStorage.setItem('gh_token', $('ghToken').value.trim());
+  localStorage.setItem('gh_owner', $('ghOwner').value.trim());
+  localStorage.setItem('gh_repo', $('ghRepo').value.trim());
+  localStorage.setItem('gh_branch', $('ghBranch').value.trim() || 'main');
+  toast('GitHub settings saved', 'ok');
+}
+
+function syncFilename(v) {
+  $('topFilename').textContent = v || 'main.php';
+}
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.mobile-tabs button[data-panel]').forEach(b => b.classList.remove('active'));
+  const map = {editor:'panelEditor', chat:'panelChat', settings:'panelSettings'};
+  $(map[name])?.classList.add('active');
+  btn?.classList.add('active');
+  if (name === 'chat') setTimeout(() => $('chatInput').focus(), 100);
 }
 
 function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+function extractCode(text) {
+  const m = text.match(/```[\w]*\n([\s\S]*?)```/);
+  return m ? m[1].trim() : '';
 }
 
 function formatReply(text) {
   return esc(text)
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-      `<pre><code>${code.trim()}</code></pre>`)
+    .replace(/```(\w*)\n([\s\S]*?)```/g, (_, l, c) => `<pre><code>${c.trim()}</code></pre>`)
     .replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
-function addMessage(role, html) {
+function toast(msg, type='') {
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+function addMessage(role, html, code='') {
   const div = document.createElement('div');
   div.className = 'msg ' + role;
-  div.innerHTML = `<span class="msg-label">${role === 'user' ? 'You' : 'AI'}</span>
-    <div class="msg-body">${html}</div>`;
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  div.innerHTML = `<span class="msg-label">${role==='user'?'You':'AI'}</span><div class="msg-body">${html}</div>`;
+
+  if (role === 'ai' && code) {
+    const id = 'c' + (++codeId);
+    codeStore[id] = code;
+    const actions = document.createElement('div');
+    actions.className = 'msg-actions';
+    const applyBtn = document.createElement('button');
+    applyBtn.textContent = 'Apply to Editor';
+    applyBtn.onclick = () => applyCode(codeStore[id]);
+    const commitBtn = document.createElement('button');
+    commitBtn.textContent = 'Commit ↑';
+    commitBtn.onclick = () => openCommitModal($('filenameInput').value, codeStore[id]);
+    actions.append(applyBtn, commitBtn);
+    div.appendChild(actions);
+  }
+
+  $('messages').appendChild(div);
+  $('messages').scrollTop = $('messages').scrollHeight;
+}
+
+function newChat() {
+  $('messages').innerHTML = `<div class="msg ai"><span class="msg-label">AI</span>
+    <div class="msg-body">Nayi chat! Kya karna hai?</div></div>`;
+}
+
+function applyCode(code) {
+  if (!code) return;
+  $('codeEditor').value = code;
+  toast('Code editor mein apply ho gaya', 'ok');
+  if (window.innerWidth <= 768) switchTab('editor', document.querySelector('[data-panel=editor]'));
+}
+
+function applyAiCode() {
+  if (lastAiCode) applyCode(lastAiCode);
+  else toast('Pehle AI se code lo', 'err');
 }
 
 async function sendMessage() {
-  const message = chatInput.value.trim();
+  const message = $('chatInput').value.trim();
   if (!message) return;
+  const context = $('codeEditor').value;
+  const filename = $('filenameInput').value.trim() || 'main.php';
 
-  const context = codeEditor.value.trim();
   addMessage('user', esc(message));
-  chatInput.value = '';
-  sendBtn.disabled = true;
-  typingEl.classList.remove('hidden');
-  saveHistory(message.slice(0, 40));
+  $('chatInput').value = '';
+  $('sendBtn').disabled = true;
+  $('typing').classList.remove('hide');
+
+  const commitWords = /commit|push|github|save karo|upload/i;
+  const wantsCommit = commitWords.test(message);
 
   try {
     const res = await fetch('?action=chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, context }),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message, context, filename}),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    addMessage('ai', formatReply(data.reply || ''));
-  } catch (e) {
-    addMessage('ai', `<span style="color:#f87171">Error: ${esc(e.message)}</span>`);
+
+    lastAiReply = data.reply || '';
+    lastAiCode = extractCode(lastAiReply);
+    addMessage('ai', formatReply(lastAiReply), lastAiCode);
+
+    if (wantsCommit && lastAiCode) {
+      setTimeout(() => openCommitModal(filename, lastAiCode, 'AI: ' + message.slice(0,60)), 500);
+    } else if (wantsCommit) {
+      openCommitModal(filename, context, message.slice(0,80));
+    }
+  } catch(e) {
+    addMessage('ai', `<span style="color:var(--danger)">${esc(e.message)}</span>`);
   } finally {
-    sendBtn.disabled = false;
-    typingEl.classList.add('hidden');
-    chatInput.focus();
+    $('sendBtn').disabled = false;
+    $('typing').classList.add('hide');
   }
 }
 
-chatInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault();
-    sendMessage();
+function openCommitModal(path='', content='', msg='') {
+  const s = ghSettings();
+  if (!s.token || !s.owner || !s.repo) {
+    toast('Pehle GitHub settings save karo', 'err');
+    if (window.innerWidth <= 768) switchTab('settings', document.querySelector('[data-panel=settings]'));
+    return;
   }
-});
+  $('commitPath').value = path || $('filenameInput').value || 'main.php';
+  $('commitMsg').value = msg || 'Update via Cursor AI';
+  $('commitModal').dataset.content = content ?? $('codeEditor').value;
+  $('commitModal').classList.add('show');
+}
 
-chatInput.addEventListener('input', () => {
-  chatInput.style.height = 'auto';
-  chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+function closeCommitModal() { $('commitModal').classList.remove('show'); }
+
+async function doCommit() {
+  const s = ghSettings();
+  const content = $('commitModal').dataset.content || $('codeEditor').value;
+  const path = $('commitPath').value.trim();
+  const message = $('commitMsg').value.trim() || 'Update via Cursor AI';
+
+  if (!content || !path) { toast('File path aur content chahiye', 'err'); return; }
+
+  closeCommitModal();
+  toast('Committing...', '');
+
+  try {
+    const res = await fetch('?action=commit', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({...s, path, message, content}),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast('✓ ' + (data.message || 'Committed!'), 'ok');
+    addMessage('ai', `<span style="color:var(--green)">✓ GitHub commit successful!\n${esc(data.url||'')}</span>`);
+  } catch(e) {
+    toast('Commit failed: ' + e.message, 'err');
+  }
+}
+
+async function testGithub() {
+  saveGhSettings();
+  const s = ghSettings();
+  if (!s.token) { toast('Token daalo', 'err'); return; }
+  try {
+    const res = await fetch('?action=github_test', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({token: s.token}),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast('Connected: @' + data.user, 'ok');
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+$('chatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
+$('commitModal').addEventListener('click', e => { if (e.target === $('commitModal')) closeCommitModal(); });
 </script>
 </body>
 </html>
