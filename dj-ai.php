@@ -17,9 +17,14 @@
 
 declare(strict_types=1);
 
+function djAiRoot(): string
+{
+    return defined('DJ_AI_ROOT') ? (string) DJ_AI_ROOT : __DIR__;
+}
+
 // ─── CLI server ───────────────────────────────────────────────────────────────
 if (PHP_SAPI === 'cli' && !isset($_SERVER['REQUEST_METHOD'])) {
-    $root = __DIR__;
+    $root = djAiRoot();
     loadEnv($root . '/.env');
     $port = (int) (env('PORT', '8787'));
     echo "Dj AI API → http://127.0.0.1:{$port}\n";
@@ -742,24 +747,27 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     exit;
 }
 
-$root = __DIR__;
+$root = djAiRoot();
 $config = DjConfig::load($root);
 $llm = new DjLlm($config);
 $indexer = new DjIndexer($config, $llm);
 $agent = new DjAgent($llm, $indexer, new DjToolExecutor());
 $router = new DjRouter();
 
-$router->get('/health', static function () use ($config): void {
+$router->get('/health', static function () use ($config, $root): void {
     DjRouter::json([
         'ok' => true,
         'provider' => $config->provider,
         'wormgptUrl' => $config->isWormgpt() ? $config->wormgptUrl : null,
+        'root' => $root,
+        'workspace' => env('WORKSPACE_ROOT', $root),
+        'host' => $_SERVER['HTTP_HOST'] ?? null,
     ]);
 });
 
-$router->post('/v1/chat', static function () use ($agent): void {
+$router->post('/v1/chat', static function () use ($agent, $root): void {
     $body = DjRouter::body();
-    $workspaceRoot = (string) ($body['workspaceRoot'] ?? getcwd() ?: '.');
+    $workspaceRoot = (string) ($body['workspaceRoot'] ?? env('WORKSPACE_ROOT', $root));
     $messages = is_array($body['messages'] ?? null) ? $body['messages'] : [];
     $rules = is_array($body['rules'] ?? null) ? $body['rules'] : [];
     $contextFiles = is_array($body['contextFiles'] ?? null) ? $body['contextFiles'] : [];

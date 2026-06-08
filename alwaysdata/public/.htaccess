@@ -1,0 +1,10 @@
+RewriteEngine On
+
+# Sab requests dj-ai API ko bhejo
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ index.php [QSA,L]
+
+# Sensitive files block
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>

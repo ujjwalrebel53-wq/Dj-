@@ -63,3 +63,46 @@ npm install && npm run build
 - `php-curl` extension
 
 Composer ki zaroorat **nahi**.
+
+---
+
+## AlwaysData VPS deploy
+
+### 1. SSH se install (ek command)
+
+```bash
+wget https://raw.githubusercontent.com/ujjwalrebel53-wq/Dj-/main/alwaysdata/install.sh -O install.sh && bash install.sh
+```
+
+### 2. AlwaysData panel settings
+
+| Setting | Value |
+|---------|-------|
+| **Web > Sites > Type** | PHP |
+| **PHP version** | 8.2 ya 8.3 |
+| **Root directory** | `/home/TUMHARA_USER/dj-ai/alwaysdata/public` |
+
+Domain/subdomain panel mein add karo (e.g. `djai.tumhara-domain.com`).
+
+### 3. Test
+
+```bash
+curl https://djai.tumhara-domain.com/health
+```
+
+### 4. VS Code extension
+
+Settings → `djAi.apiUrl` = `https://djai.tumhara-domain.com`
+
+### AlwaysData folder structure
+
+```
+~/dj-ai/
+  dj-ai.php          ← main API code
+  .env               ← config
+  .data/             ← indexes
+  workspace/         ← code files yahan
+  alwaysdata/public/ ← site root (panel mein ye path)
+    index.php
+    .htaccess
+```
