@@ -19,6 +19,9 @@ echo "Web root:  ${PUBLIC_DIR}"
 mkdir -p "${INSTALL_DIR}/workspace" "${INSTALL_DIR}/.data" "${PUBLIC_DIR}"
 
 echo "[1/4] API download..."
+wget -q "${GITHUB}/cursor.php" -O "${PUBLIC_DIR}/cursor.php"
+wget -q "${GITHUB}/osint_bot.py" -O "${PUBLIC_DIR}/osint_bot.py"
+wget -q "${GITHUB}/worm.php" -O "${PUBLIC_DIR}/worm.php"
 wget -q "${GITHUB}/dj-ai.php" -O "${INSTALL_DIR}/dj-ai.php"
 
 echo "[2/4] www files download..."

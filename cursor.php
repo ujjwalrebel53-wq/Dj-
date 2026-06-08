@@ -8,6 +8,57 @@ declare(strict_types=1);
 
 const WORM_API = 'https://wormgpt.freeapihub.workers.dev/chat';
 
+function wormChat(string $prompt, int $maxParts = 8): string
+{
+    $full = '';
+    $partPrompt = $prompt;
+
+    for ($i = 0; $i < $maxParts; $i++) {
+        $url = WORM_API . '?q=' . rawurlencode($partPrompt);
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120]);
+        $body = curl_exec($ch);
+        curl_close($ch);
+
+        if ($body === false) {
+            break;
+        }
+
+        $data = json_decode($body, true);
+        $chunk = (string) ($data['reply'] ?? '');
+        if ($chunk === '') {
+            break;
+        }
+
+        $full .= ($full !== '' ? "\n" : '') . $chunk;
+
+        $fences = substr_count($full, '```');
+        $chunkLen = strlen($chunk);
+        $closedBlocks = $fences % 2 === 0;
+        $shortReply = $chunkLen < 550;
+
+        if ($shortReply && $closedBlocks) {
+            break;
+        }
+        if ($i > 0 && $chunkLen < 400 && $closedBlocks) {
+            break;
+        }
+
+        $tail = substr($chunk, -400);
+        $partPrompt = <<<CONT
+Continue EXACTLY where you stopped. DO NOT repeat. Hinglish mein.
+POORA code complete karo — koi placeholder mat chhod.
+Pehle wala last part:
+---
+{$tail}
+---
+Ab continue karo (sirf naya hissa):
+CONT;
+    }
+
+    return $full;
+}
+
 function jsonOut(array $data, int $code = 200): void
 {
     http_response_code($code);
@@ -68,6 +119,9 @@ STRICT RULES — MUST FOLLOW:
 3. Tone friendly aur helpful rakho — jaise ek bada bhai explain kare.
 4. Code blocks markdown mein do (```language).
 5. Pehle Hinglish mein explain karo, phir code do.
+6. CRITICAL: POORA COMPLETE code likho — kabhi "..." ya placeholder mat chhod.
+7. Agar code lamba hai tab bhi ek continuous block mein poora file code do.
+8. Functions, imports, main — sab kuch include karo. Incomplete code FORBIDDEN.
 
 Tu Cursor jaisa coding AI hai. File: {$filename}
 
@@ -92,19 +146,37 @@ PROMPT;
         $prompt .= "--- Chat khatam ---\n";
     }
 
-    $prompt .= "\nUSER (ab jawab Hinglish mein do): {$message}";
+    $prompt .= "\nUSER (ab jawab Hinglish mein do, POORA code): {$message}";
 
-    $url = WORM_API . '?q=' . rawurlencode($prompt);
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120]);
-    $body = curl_exec($ch);
-    curl_close($ch);
+    $wantsFullCode = (bool) preg_match('/\b(poora|pura|full|complete|advanced|pura code|poora code|osint|bot|script|project)\b/i', $message);
+    $reply = wormChat($prompt, $wantsFullCode ? 8 : 3);
 
-    if ($body === false) {
+    if ($reply === '') {
         jsonOut(['error' => 'API failed'], 500);
     }
-    $data = json_decode($body, true);
-    jsonOut(['reply' => (string) ($data['reply'] ?? '')]);
+
+    if ($wantsFullCode && preg_match('/\bosint\b/i', $message)) {
+        $template = __DIR__ . '/osint_bot.py';
+        if (is_file($template)) {
+            $code = (string) file_get_contents($template);
+            $reply .= "\n\n---\n**Bhai ye POORA ready-made Advanced OSINT Bot hai** (API ne kaata ho to ye use kar):\n\n```python\n"
+                . $code . "\n```\n\nRun: `pip install python-telegram-bot httpx dnspython phonenumbers` phir `python osint_bot.py`";
+        }
+    }
+
+    jsonOut(['reply' => $reply]);
+}
+
+if ($action === 'template') {
+    $name = (string) ($_GET['name'] ?? '');
+    $files = ['osint' => 'osint_bot.py'];
+    if (!isset($files[$name]) || !is_file(__DIR__ . '/' . $files[$name])) {
+        jsonOut(['error' => 'template not found'], 404);
+    }
+    jsonOut([
+        'filename' => $files[$name],
+        'code' => (string) file_get_contents(__DIR__ . '/' . $files[$name]),
+    ]);
 }
 
 if ($action === 'github_test') {
@@ -321,6 +393,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
       <span class="tab active" id="tabFile">📄 <span id="topFilename">main.php</span></span>
       <button class="desk-only" onclick="openCommitModal()">Commit ↑</button>
       <button onclick="applyAiCode()" title="AI code apply">Apply</button>
+      <button onclick="loadTemplate('osint')" title="OSINT bot template">OSINT Bot</button>
       <span class="spacer"></span>
       <span class="status-dot"></span>
     </div>
@@ -606,6 +679,7 @@ async function sendMessage() {
   addMessage('user', message);
   $('chatInput').value = '';
   $('sendBtn').disabled = true;
+  $('typing').textContent = 'AI poora code likh raha hai... (thoda wait)';
   $('typing').classList.remove('hide');
   saveSessions();
 
@@ -634,8 +708,22 @@ async function sendMessage() {
     addMessage('ai', 'Bhai error aa gaya: ' + e.message);
   } finally {
     $('sendBtn').disabled = false;
+    $('typing').textContent = 'AI soch raha hai...';
     $('typing').classList.add('hide');
   }
+}
+
+async function loadTemplate(name) {
+  try {
+    const res = await fetch('?action=template&name=' + name);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    $('codeEditor').value = data.code;
+    $('filenameInput').value = data.filename;
+    syncFilename(data.filename);
+    toast('Template load ho gaya: ' + data.filename, 'ok');
+    if (window.innerWidth <= 768) switchTab('editor', document.querySelector('[data-panel=editor]'));
+  } catch(e) { toast(e.message, 'err'); }
 }
 
 function openCommitModal(path='', content='', msg='') {
