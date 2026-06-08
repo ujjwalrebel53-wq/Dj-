@@ -1,0 +1,73 @@
+{
+  "name": "@dj-ai/extension",
+  "displayName": "Dj AI",
+  "description": "Cursor-like AI coding assistant powered by your own API",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "dj-ai",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["AI", "Programming Languages"],
+  "activationEvents": [
+    "onView:dj-ai.chatView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "dj-ai.chatView",
+          "name": "Dj AI"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "dj-ai.openChat",
+        "title": "Dj AI: Open Chat"
+      },
+      {
+        "command": "dj-ai.indexWorkspace",
+        "title": "Dj AI: Index Workspace"
+      },
+      {
+        "command": "dj-ai.askAboutSelection",
+        "title": "Dj AI: Ask About Selection"
+      }
+    ],
+    "configuration": {
+      "title": "Dj AI",
+      "properties": {
+        "djAi.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:8787",
+          "description": "Base URL for your Dj AI API"
+        },
+        "djAi.model": {
+          "type": "string",
+          "default": "gpt-4o",
+          "description": "Default LLM model"
+        },
+        "djAi.rules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Custom rules injected into every chat (like .cursorrules)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "dev": "tsc -w",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.8.3"
+  }
+}
