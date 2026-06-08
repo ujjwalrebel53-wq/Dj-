@@ -2,12 +2,12 @@
   "name": "dj-ai",
   "version": "0.1.0",
   "private": true,
-  "description": "Cursor-like AI coding assistant with your own PHP API",
+  "description": "Cursor-like AI coding assistant — single PHP API",
   "workspaces": [
     "packages/extension"
   ],
   "scripts": {
-    "dev:api": "cd packages/api-php && composer start",
+    "dev:api": "php dj-ai.php",
     "dev:extension": "npm run dev -w @dj-ai/extension",
     "build": "npm run build -w @dj-ai/extension",
     "typecheck": "npm run typecheck -w @dj-ai/extension"

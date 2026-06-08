@@ -1,102 +1,65 @@
-# Dj AI — Cursor jaisa coding assistant (PHP API)
+# Dj AI — Single PHP file (Cursor jaisa assistant)
 
-Dj AI ek **Cursor-style AI coding assistant** hai jisme:
+Poora backend **ek hi file** mein: `dj-ai.php`
 
-- **Tumhara alag PHP API** (LLM provider, keys, billing — sab tumhare control mein)
-- **VS Code extension** client (chat panel, workspace context, indexing)
-- **Agent mode** with tools: `read_file`, `write_file`, `grep`, `run_terminal`
-- **Codebase semantic search** via embeddings
-- **Custom rules** (`.cursorrules` jaisa)
+- Chat + Agent mode (tools)
+- Codebase indexing & semantic search
+- OpenAI-compatible LLM (OpenAI / Groq / Ollama)
+- VS Code extension client (optional)
 
-## Architecture
-
-```
-┌─────────────────────┐         ┌──────────────────────────────┐
-│  VS Code Extension  │  HTTP   │  Dj AI PHP API               │
-│  - Chat UI          │ ──────► │  - /v1/chat (SSE streaming)  │
-│  - @file context    │         │  - /v1/index, /v1/search     │
-│  - Index workspace  │         │  - Tool executor (agent loop)│
-└─────────────────────┘         └──────────────┬───────────────┘
-                                               │
-                                               ▼
-                                    ┌──────────────────────┐
-                                    │  LLM Provider        │
-                                    │  (OpenAI-compatible) │
-                                    └──────────────────────┘
-```
-
-## Quick start
-
-### 1. PHP API setup
+## Chalana (sirf 2 steps)
 
 ```bash
-cd packages/api-php
-composer install
 cp .env.example .env
-# Edit: LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
-composer start
+# .env mein LLM_API_KEY set karo
+
+php dj-ai.php
 ```
 
-API chalega: `http://localhost:8787`
-
-### 2. VS Code extension
+API: `http://localhost:8787`
 
 ```bash
-npm install
-npm run build
+curl http://localhost:8787/health
+# {"ok":true}
 ```
 
-VS Code mein `packages/extension` kholo → **F5** dabao.
+## .env config
 
-Settings → `Dj AI` → `Api Url` = `http://localhost:8787`
+```env
+PORT=8787
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=your-key
+LLM_MODEL=gpt-4o
+EMBEDDING_MODEL=text-embedding-3-small
+DATA_DIR=.data
+```
 
-### LLM providers
-
-| Provider | `LLM_BASE_URL` |
-|----------|----------------|
+| Provider | LLM_BASE_URL |
+|----------|--------------|
 | OpenAI | `https://api.openai.com/v1` |
 | Groq | `https://api.groq.com/openai/v1` |
-| Ollama (local) | `http://localhost:11434/v1` |
+| Ollama | `http://localhost:11434/v1` |
 
 ## API endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /v1/chat` | Streaming chat + agent tool loop |
-| `POST /v1/index` | Workspace embed & index |
-| `POST /v1/search` | Semantic codebase search |
+| Endpoint | Kaam |
+|----------|------|
 | `GET /health` | Health check |
+| `POST /v1/chat` | Streaming chat + agent |
+| `POST /v1/index` | Workspace index |
+| `POST /v1/search` | Semantic search |
 
-## PHP project structure
+## VS Code extension (optional)
 
-```
-packages/api-php/
-  public/index.php      # Entry point + routes
-  src/
-    Config.php          # .env config
-    Http/Router.php     # Simple router
-    Services/
-      LlmService.php    # OpenAI-compatible LLM calls
-      AgentService.php  # Agent tool loop
-      IndexerService.php
-    Tools/ToolExecutor.php
-  composer.json
+```bash
+npm install && npm run build
+# packages/extension → F5
+# Settings: djAi.apiUrl = http://localhost:8787
 ```
 
-## Cursor feature roadmap
+## Requirements
 
-| Feature | Status |
-|---------|--------|
-| Chat panel | ✅ MVP |
-| Agent (tools) | ✅ MVP |
-| Codebase indexing | ✅ MVP |
-| Custom rules | ✅ MVP |
-| Active file context | ✅ MVP |
-| Tab autocomplete | 🔲 Phase 2 |
-| Inline edit (Cmd+K) | 🔲 Phase 2 |
-| Composer (multi-file) | 🔲 Phase 2 |
-| MCP tools | 🔲 Phase 3 |
+- PHP 8.2+
+- `php-curl` extension
 
-## License
-
-MIT
+Composer ki zaroorat **nahi**.
