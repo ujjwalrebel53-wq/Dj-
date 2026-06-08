@@ -2,15 +2,15 @@
   "name": "dj-ai",
   "version": "0.1.0",
   "private": true,
-  "description": "Cursor-like AI coding assistant with your own API",
+  "description": "Cursor-like AI coding assistant with your own PHP API",
   "workspaces": [
-    "packages/*"
+    "packages/extension"
   ],
   "scripts": {
-    "dev:api": "npm run dev -w @dj-ai/api",
+    "dev:api": "cd packages/api-php && composer start",
     "dev:extension": "npm run dev -w @dj-ai/extension",
-    "build": "npm run build -w @dj-ai/shared && npm run build -w @dj-ai/api && npm run build -w @dj-ai/extension",
-    "typecheck": "npm run build -w @dj-ai/shared && npm run typecheck -w @dj-ai/shared && npm run typecheck -w @dj-ai/api && npm run typecheck -w @dj-ai/extension"
+    "build": "npm run build -w @dj-ai/extension",
+    "typecheck": "npm run typecheck -w @dj-ai/extension"
   },
   "engines": {
     "node": ">=20"

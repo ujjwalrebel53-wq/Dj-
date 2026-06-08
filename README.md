@@ -1,8 +1,8 @@
-# Dj AI — Cursor jaisa coding assistant (apna API)
+# Dj AI — Cursor jaisa coding assistant (PHP API)
 
 Dj AI ek **Cursor-style AI coding assistant** hai jisme:
 
-- **Tumhara alag API** (LLM provider, keys, billing — sab tumhare control mein)
+- **Tumhara alag PHP API** (LLM provider, keys, billing — sab tumhare control mein)
 - **VS Code extension** client (chat panel, workspace context, indexing)
 - **Agent mode** with tools: `read_file`, `write_file`, `grep`, `run_terminal`
 - **Codebase semantic search** via embeddings
@@ -12,7 +12,7 @@ Dj AI ek **Cursor-style AI coding assistant** hai jisme:
 
 ```
 ┌─────────────────────┐         ┌──────────────────────────────┐
-│  VS Code Extension  │  HTTP   │  Dj AI API (tumhara server)  │
+│  VS Code Extension  │  HTTP   │  Dj AI PHP API               │
 │  - Chat UI          │ ──────► │  - /v1/chat (SSE streaming)  │
 │  - @file context    │         │  - /v1/index, /v1/search     │
 │  - Index workspace  │         │  - Tool executor (agent loop)│
@@ -22,49 +22,41 @@ Dj AI ek **Cursor-style AI coding assistant** hai jisme:
                                     ┌──────────────────────┐
                                     │  LLM Provider        │
                                     │  (OpenAI-compatible) │
-                                    │  OpenAI / Groq /     │
-                                    │  Ollama / custom     │
                                     └──────────────────────┘
 ```
 
 ## Quick start
 
-### 1. Install
+### 1. PHP API setup
+
+```bash
+cd packages/api-php
+composer install
+cp .env.example .env
+# Edit: LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+composer start
+```
+
+API chalega: `http://localhost:8787`
+
+### 2. VS Code extension
 
 ```bash
 npm install
+npm run build
 ```
 
-### 2. API configure karo
+VS Code mein `packages/extension` kholo → **F5** dabao.
 
-```bash
-cp packages/api/.env.example packages/api/.env
-# Edit: LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
-```
+Settings → `Dj AI` → `Api Url` = `http://localhost:8787`
 
-Koi bhi **OpenAI-compatible** endpoint use kar sakte ho:
+### LLM providers
 
 | Provider | `LLM_BASE_URL` |
 |----------|----------------|
 | OpenAI | `https://api.openai.com/v1` |
 | Groq | `https://api.groq.com/openai/v1` |
 | Ollama (local) | `http://localhost:11434/v1` |
-
-### 3. API start karo
-
-```bash
-npm run dev:api
-```
-
-### 4. Extension build & run
-
-```bash
-npm run build
-```
-
-VS Code mein `packages/extension` folder open karo aur **F5** press karo (Extension Development Host).
-
-Settings → `Dj AI` → `Api Url` = `http://localhost:8787`
 
 ## API endpoints
 
@@ -75,7 +67,23 @@ Settings → `Dj AI` → `Api Url` = `http://localhost:8787`
 | `POST /v1/search` | Semantic codebase search |
 | `GET /health` | Health check |
 
-## Cursor feature parity roadmap
+## PHP project structure
+
+```
+packages/api-php/
+  public/index.php      # Entry point + routes
+  src/
+    Config.php          # .env config
+    Http/Router.php     # Simple router
+    Services/
+      LlmService.php    # OpenAI-compatible LLM calls
+      AgentService.php  # Agent tool loop
+      IndexerService.php
+    Tools/ToolExecutor.php
+  composer.json
+```
+
+## Cursor feature roadmap
 
 | Feature | Status |
 |---------|--------|
@@ -88,16 +96,6 @@ Settings → `Dj AI` → `Api Url` = `http://localhost:8787`
 | Inline edit (Cmd+K) | 🔲 Phase 2 |
 | Composer (multi-file) | 🔲 Phase 2 |
 | MCP tools | 🔲 Phase 3 |
-| Full IDE fork | 🔲 Phase 3 |
-
-## Project structure
-
-```
-packages/
-  shared/     # Shared TypeScript types
-  api/        # Your separate backend API
-  extension/  # VS Code extension client
-```
 
 ## License
 
