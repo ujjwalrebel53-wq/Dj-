@@ -25,20 +25,20 @@ curl http://localhost:8787/health
 
 ## .env config
 
+**Default: WormGPT API** (free, no API key)
+
 ```env
-PORT=8787
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_API_KEY=your-key
-LLM_MODEL=gpt-4o
-EMBEDDING_MODEL=text-embedding-3-small
-DATA_DIR=.data
+LLM_PROVIDER=wormgpt
+WORMGPT_API_URL=https://wormgpt.freeapihub.workers.dev/chat
 ```
 
-| Provider | LLM_BASE_URL |
-|----------|--------------|
-| OpenAI | `https://api.openai.com/v1` |
-| Groq | `https://api.groq.com/openai/v1` |
-| Ollama | `http://localhost:11434/v1` |
+OpenAI use karna ho to:
+
+```env
+LLM_PROVIDER=openai
+LLM_API_KEY=your-key
+LLM_BASE_URL=https://api.openai.com/v1
+```
 
 ## API endpoints
 

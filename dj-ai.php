@@ -3,8 +3,10 @@
  * Dj AI — Cursor jaisa coding assistant (single PHP file)
  *
  * Run:
- *   cp .env.example .env   # API key set karo
+ *   cp .env.example .env
  *   php dj-ai.php
+ *
+ * Default LLM: WormGPT API (https://wormgpt.freeapihub.workers.dev/chat?q=)
  *
  * Endpoints:
  *   GET  /health
@@ -56,12 +58,19 @@ function env(string $key, string $default = ''): string
 final class DjConfig
 {
     public function __construct(
+        public readonly string $provider,
+        public readonly string $wormgptUrl,
         public readonly string $llmBaseUrl,
         public readonly string $llmApiKey,
         public readonly string $llmModel,
         public readonly string $embeddingModel,
         public readonly string $dataDir,
     ) {}
+
+    public function isWormgpt(): bool
+    {
+        return $this->provider === 'wormgpt';
+    }
 
     public static function load(string $root): self
     {
@@ -72,6 +81,8 @@ final class DjConfig
         }
 
         return new self(
+            provider: strtolower(env('LLM_PROVIDER', 'wormgpt')),
+            wormgptUrl: rtrim(env('WORMGPT_API_URL', 'https://wormgpt.freeapihub.workers.dev/chat'), '/'),
             llmBaseUrl: rtrim(env('LLM_BASE_URL', 'https://api.openai.com/v1'), '/'),
             llmApiKey: env('LLM_API_KEY'),
             llmModel: env('LLM_MODEL', 'gpt-4o'),
@@ -305,6 +316,11 @@ final class DjLlm
      */
     public function streamChat(array $messages, array $tools, callable $onEvent, ?string $model = null): void
     {
+        if ($this->config->isWormgpt()) {
+            $this->streamWormgpt($messages, $onEvent);
+            return;
+        }
+
         $pending = [];
         $this->stream('/chat/completions', [
             'model' => $model ?? $this->config->llmModel,
@@ -347,9 +363,98 @@ final class DjLlm
     /** @return list<float> */
     public function embed(string $text): array
     {
+        if ($this->config->isWormgpt()) {
+            return $this->localEmbed($text);
+        }
+
         $res = $this->post('/embeddings', ['model' => $this->config->embeddingModel, 'input' => $text]);
         $emb = $res['data'][0]['embedding'] ?? [];
         return is_array($emb) ? array_map('floatval', $emb) : [];
+    }
+
+    /**
+     * @param list<array{role: string, content: string, name?: string, toolCallId?: string}> $messages
+     * @param callable(array{type: string, content?: string}): void $onEvent
+     */
+    private function streamWormgpt(array $messages, callable $onEvent): void
+    {
+        $prompt = $this->messagesToPrompt($messages);
+        if (strlen($prompt) > 6000) {
+            $prompt = substr($prompt, -6000);
+        }
+
+        $url = $this->config->wormgptUrl . '?q=' . rawurlencode($prompt);
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTPHEADER => ['Accept: application/json'],
+        ]);
+
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        if ($body === false) {
+            throw new RuntimeException('WormGPT request failed: ' . $err);
+        }
+
+        $decoded = json_decode($body, true);
+        if ($status >= 400 || !is_array($decoded)) {
+            throw new RuntimeException('WormGPT error (' . $status . '): ' . $body);
+        }
+
+        if (($decoded['status'] ?? '') !== 'success') {
+            $message = (string) ($decoded['error'] ?? $decoded['reply'] ?? $body);
+            throw new RuntimeException('WormGPT error: ' . $message);
+        }
+
+        $reply = (string) ($decoded['reply'] ?? '');
+        foreach (str_split($reply, 24) as $chunk) {
+            $onEvent(['type' => 'text', 'content' => $chunk]);
+        }
+    }
+
+    /** @param list<array{role: string, content: string, name?: string, toolCallId?: string}> $messages */
+    private function messagesToPrompt(array $messages): string
+    {
+        $parts = [];
+        foreach ($messages as $m) {
+            $role = strtoupper((string) ($m['role'] ?? 'user'));
+            $content = trim((string) ($m['content'] ?? ''));
+            if ($content === '') {
+                continue;
+            }
+            if ($role === 'TOOL') {
+                $parts[] = '[TOOL ' . ($m['name'] ?? 'result') . "]\n" . $content;
+                continue;
+            }
+            $parts[] = "[{$role}]\n" . $content;
+        }
+
+        return implode("\n\n", $parts);
+    }
+
+    /** @return list<float> */
+    private function localEmbed(string $text): array
+    {
+        $dim = 256;
+        $vec = array_fill(0, $dim, 0.0);
+        $words = preg_split('/\W+/u', mb_strtolower($text)) ?: [];
+        foreach ($words as $word) {
+            if ($word === '' || strlen($word) < 2) {
+                continue;
+            }
+            $idx = crc32($word) % $dim;
+            $vec[$idx] += 1.0;
+        }
+        $norm = sqrt(array_sum(array_map(fn ($v) => $v ** 2, $vec)));
+        if ($norm > 0) {
+            $vec = array_map(fn ($v) => $v / $norm, $vec);
+        }
+        return $vec;
     }
 
     /** @param list<array{role: string, content: string, name?: string, toolCallId?: string}> $messages */
@@ -644,7 +749,13 @@ $indexer = new DjIndexer($config, $llm);
 $agent = new DjAgent($llm, $indexer, new DjToolExecutor());
 $router = new DjRouter();
 
-$router->get('/health', static fn () => DjRouter::json(['ok' => true]));
+$router->get('/health', static function () use ($config): void {
+    DjRouter::json([
+        'ok' => true,
+        'provider' => $config->provider,
+        'wormgptUrl' => $config->isWormgpt() ? $config->wormgptUrl : null,
+    ]);
+});
 
 $router->post('/v1/chat', static function () use ($agent): void {
     $body = DjRouter::body();
