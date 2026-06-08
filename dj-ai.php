@@ -759,6 +759,7 @@ $router->get('/health', static function () use ($config, $root): void {
         'ok' => true,
         'provider' => $config->provider,
         'wormgptUrl' => $config->isWormgpt() ? $config->wormgptUrl : null,
+        'siteUrl' => env('SITE_URL', ''),
         'root' => $root,
         'workspace' => env('WORKSPACE_ROOT', $root),
         'host' => $_SERVER['HTTP_HOST'] ?? null,

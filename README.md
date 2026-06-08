@@ -66,33 +66,47 @@ Composer ki zaroorat **nahi**.
 
 ---
 
-## AlwaysData VPS deploy
+## AlwaysData — rebelai.alwaysdata.net
 
-### 1. SSH se install (ek command)
+### 1. SSH login
+
+```bash
+ssh rebelai@ssh-rebelai.alwaysdata.net
+```
+
+### 2. Ek command install
+
+```bash
+wget https://raw.githubusercontent.com/ujjwalrebel53-wq/Dj-/main/alwaysdata/rebelai-install.sh -O rebelai-install.sh && bash rebelai-install.sh
+```
+
+### 3. AlwaysData panel
+
+**admin.alwaysdata.com** → Web → Sites → `rebelai.alwaysdata.net` → Edit:
+
+| Setting | Value |
+|---------|-------|
+| Type | PHP |
+| PHP version | 8.2+ |
+| Root directory | `/home/rebelai/dj-ai/alwaysdata/public` |
+
+### 4. Test
+
+```bash
+curl https://rebelai.alwaysdata.net/health
+```
+
+### 5. VS Code extension
+
+`djAi.apiUrl` = `https://rebelai.alwaysdata.net`
+
+---
+
+## AlwaysData (dusre account ke liye)
 
 ```bash
 wget https://raw.githubusercontent.com/ujjwalrebel53-wq/Dj-/main/alwaysdata/install.sh -O install.sh && bash install.sh
 ```
-
-### 2. AlwaysData panel settings
-
-| Setting | Value |
-|---------|-------|
-| **Web > Sites > Type** | PHP |
-| **PHP version** | 8.2 ya 8.3 |
-| **Root directory** | `/home/TUMHARA_USER/dj-ai/alwaysdata/public` |
-
-Domain/subdomain panel mein add karo (e.g. `djai.tumhara-domain.com`).
-
-### 3. Test
-
-```bash
-curl https://djai.tumhara-domain.com/health
-```
-
-### 4. VS Code extension
-
-Settings → `djAi.apiUrl` = `https://djai.tumhara-domain.com`
 
 ### AlwaysData folder structure
 
